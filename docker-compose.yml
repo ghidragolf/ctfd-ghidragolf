@@ -1,0 +1,103 @@
+version: '3.9'
+services:
+  ctfd:
+    image: ctfd:ghidragolf
+    build:
+      context: ./services
+      dockerfile: ctfd.dockerfile
+    restart: always
+    user: ctfd
+    container_name: "ctfd"
+    environment:
+      - UPLOAD_FOLDER=/var/uploads
+      - DATABASE_URL=mysql+pymysql://ctfd:ctfd@db/ctfd #Change credentials for prod
+      - REDIS_URL=redis://cache:6379
+      - WORKERS=1
+      - LOG_FOLDER=/var/log/CTFd
+      #- ACCESS_LOG=/var/log/CTFd/access.log
+      - ACCESS_LOG=-
+      #- ERROR_LOG=/var/log/CTFd/error.log
+      - ERROR_LOG=-
+      - REVERSE_PROXY=true
+      - RABBITMQ_URL=amqp://guest:guest@rabbit:5672 # Configurable in CTFD->config->settings
+    volumes:
+      - .data/CTFd/logs:/var/log/CTFd
+      - .data/CTFd/uploads:/var/uploads
+      - ./plugins/ctfd-fileupload/ctfd_script_challenges:/opt/CTFd/CTFd/plugins/ctfd_script_challenges
+    depends_on:
+      - db
+      - rabbit
+    networks:
+        default:
+  rabbit:
+    container_name: "rabbit"
+    image: rabbitmq:3.8-management-alpine
+    volumes:
+      # Creates ctfd queue,and specifies rabbitmq user creds
+      # update for prod environments
+      - ./conf/rabbitmq/definitions.json:/etc/rabbitmq/definitions.json:ro 
+    ports:
+    #   # HTTP management UI
+      - 127.0.0.1:5671:5671
+      - 127.0.0.1:5672:5672
+      - 127.0.0.1:15672:15672
+    networks:
+        default:
+  consumer:
+    container_name: "consumer"
+    image: consumer:latest
+    restart: always
+    build:
+      context: ./services/gg-consumer
+      dockerfile: Dockerfile
+    user: guser
+     #- YARA_PATH=/yara
+    entrypoint: ["python3", "/opt/app/consumer.py", "--rabbitmqhost",
+        "rabbit", "--rabbitmqqueue", "ctfd", "--rabbitmqusername", "guest",
+        "--rabbitmqpassword", "guest"]
+    depends_on:
+      - rabbit
+    volumes:
+      - ./conf/consumer/yara:/yara:ro # challenge binaries
+      - ./conf/consumer/binaries:/binaries:ro # challenge binaries
+      - ./conf/consumer/submissions/:/submissions:rw #ghidra script submissions
+      - ./conf/consumer/glogdir:/glogdir:rw # log file from analyzeHeadless output
+    cap_drop:
+      - all
+    networks:
+        default:
+  nginx:
+    container_name: "nginx"
+    image: nginx:stable
+    restart: always
+    volumes:
+      - ./conf/nginx/http.conf:/etc/nginx/nginx.conf
+    ports:
+      - 80:80
+    depends_on:
+      - ctfd
+  db:
+    container_name: "mariadb"
+    image: mariadb:10.4.12
+    restart: always
+    environment:
+      - MYSQL_ROOT_PASSWORD=ctfd #change creds for prod
+      - MYSQL_USER=ctfd #change creds for prod
+      - MYSQL_PASSWORD=ctfd #change creds for prod
+      - MYSQL_DATABASE=ctfd #change creds for prod
+    volumes:
+      - .data/mysql:/var/lib/mysql
+    networks:
+        default:
+    # This command is required to set important mariadb defaults
+    command: [mysqld, --character-set-server=utf8mb4, --collation-server=utf8mb4_unicode_ci, --wait_timeout=28800, --log-warnings=0]
+  cache:
+    container_name: "cache"
+    image: redis:4
+    restart: always
+    volumes:
+    - .data/redis:/data
+    networks:
+        default:
+networks:
+  default:
