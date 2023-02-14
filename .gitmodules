@@ -1,3 +1,6 @@
 [submodule "services/gg-consumer"]
 	path = services/gg-consumer
 	url = git@github.com:ghidragolf/gg-consumer
+[submodule "plugins/ctfd-fileupload"]
+	path = plugins/ctfd-fileupload
+	url = git@github.com:ghidragolf/ctfd-fileupload
